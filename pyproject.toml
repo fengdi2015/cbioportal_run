@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geo-downloader"
+version = "0.1.0"
+description = "Small GEO downloader for single-cell series like GSE150290"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "anndata>=0.12",
+  "h5py>=3.16",
+  "numpy>=2.4",
+  "pandas>=2.3",
+  "scipy>=1.17",
+]
+
+[project.scripts]
+download-geo = "geo_downloader.cli:main"
+geo-to-h5ad = "geo_downloader.convert_cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

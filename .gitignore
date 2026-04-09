@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest-cache/
+.pytest-tmp/
+downloads/
+*.egg-info/
+*.h5ad
