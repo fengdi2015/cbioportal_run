@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "geo-downloader"
+name = "cbio"
 version = "0.1.0"
-description = "Small GEO downloader for single-cell series like GSE150290"
+description = "Small cBioPortal and GEO workflow toolkit for single-cell and cancer data"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,12 +13,20 @@ dependencies = [
   "h5py>=3.16",
   "numpy>=2.4",
   "pandas>=2.3",
+  "matplotlib>=3.10",
+  "requests>=2.33",
   "scipy>=1.17",
 ]
 
 [project.scripts]
 download-geo = "geo_downloader.cli:main"
 geo-to-h5ad = "geo_downloader.convert_cli:main"
+cbioportal-plot = "geo_downloader.cbioportal_cli:main"
+cbioportal-build-index = "geo_downloader.cbioportal_index_cli:main"
+smoke-cbioportal-luad-cptac = "scripts.smoke_cbioportal_luad_cptac:main"
+
+[tool.setuptools.package-data]
+geo_downloader = ["cbioportal_study_index.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
