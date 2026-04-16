@@ -124,7 +124,7 @@ If you want the default 2025-style studies for a cancer family, use `--cancer` i
 cbioportal-plot \
   --cancer luad \
   --mutation-genes STK11,KRAS,TP53 \
-  --mrna-genes CD3D,MX1,MX2 \
+  --mrna-genes CD3D,CD68,FAP,CD8B,CD79A \
   --presentation \
   --output-dir downloads/cbioportal
 ```
@@ -137,7 +137,7 @@ The default presentation mode now writes both a heatmap and a relationship figur
 cbioportal-plot \
   --cancer luad \
   --mutation-genes STK11,KRAS,TP53 \
-  --mrna-genes CD3D,MX1,MX2 \
+  --mrna-genes CD3D,CD68,FAP,CD8B,CD79A \
   --presentation \
   --output-dir downloads/cbioportal
 ```
