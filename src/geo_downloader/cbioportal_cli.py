@@ -18,6 +18,7 @@ from geo_downloader.cbioportal import (
     plot_cbioportal_oncoplot,
     save_cbioportal_outputs,
     resolve_all_studies_from_index,
+    _is_mutated,
 )
 
 
@@ -34,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--all-cancers",
         action="store_true",
-        help="Run every cancer family from the frozen index, using TCGA GDC 2025 and matching CPTAC studies when available.",
+        help="Run every cancer family from the frozen index, using TCGA GDC 2025 and matching CPTAC studies when available. Studies with no usable mutation signal are skipped.",
     )
     parser.add_argument(
         "--mutation-genes",
@@ -175,10 +176,11 @@ def main(argv: Iterable[str] | None = None) -> int:
                 if args.figure_style == "relationship" and violin_plot_path == heatmap_plot_path:
                     heatmap_plot_path = output_dir / "heatmap.png"
                 association_table = None
+                has_mutation_signal = _has_any_mutation_signal(mutation_table)
                 if args.figure_style == "relationship":
-                    if mutation_table.empty or mrna_raw_table.empty:
+                    if not has_mutation_signal or mrna_raw_table.empty:
                         if args.all_cancers:
-                            print(f"skip: {study.study_id} has no usable mutation or expression table")
+                            print(f"skip: {study.study_id} has no usable mutation signal or expression table")
                             continue
                         print("error: relationship figure requires both mutation and expression tables", file=sys.stderr)
                         return 1
@@ -277,6 +279,13 @@ def main(argv: Iterable[str] | None = None) -> int:
     except Exception as exc:  # pragma: no cover
         print(f"error: {exc}", file=sys.stderr)
         return 1
+
+
+def _has_any_mutation_signal(mutation_table: pd.DataFrame) -> bool:
+    if mutation_table.empty:
+        return False
+    mutated = mutation_table.applymap(_is_mutated)
+    return bool(mutated.to_numpy(dtype=bool).any())
 
 
 if __name__ == "__main__":

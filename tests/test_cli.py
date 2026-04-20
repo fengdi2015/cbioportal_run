@@ -706,7 +706,7 @@ def test_cbioportal_cli_all_cancers_mode(tmp_path, monkeypatch):
     assert (tmp_path / "all" / "brca_tcga_gdc" / "violin.png").exists()
 
 
-def test_cbioportal_cli_all_cancers_skips_empty_associations(tmp_path, monkeypatch):
+def test_cbioportal_cli_all_cancers_skips_no_mutation_signal(tmp_path, monkeypatch):
     index_path = tmp_path / "index.json"
     index_path.write_text("{}", encoding="utf-8")
 
@@ -750,22 +750,23 @@ def test_cbioportal_cli_all_cancers_skips_empty_associations(tmp_path, monkeypat
                 study=skip_study,
                 sample_list_id="skip_tcga_gdc_all",
                 sample_ids=("S1", "S2"),
-                mutation_profile=None,
-                mrna_profile=None,
-                mrna_raw_profile=None,
+                mutation_profile=CbioPortalProfile("skip_mutations", "skip_tcga_gdc", "MUTATION_EXTENDED", None, "Mutations"),
+                mrna_profile=CbioPortalProfile("skip_mrna", "skip_tcga_gdc", "MRNA_EXPRESSION", "RNA-Seq", "mRNA"),
+                mrna_raw_profile=CbioPortalProfile("skip_mrna_raw", "skip_tcga_gdc", "MRNA_EXPRESSION", "RNA-Seq", "mRNA raw"),
                 mrna_transform=None,
                 mutation_genes=("TP53",),
                 mrna_genes=("MYC",),
             )
-            empty = pd.DataFrame(index=[], columns=["S1", "S2"])
-            return CbioPortalDataBundle(source=source, mutation_table=empty, mrna_table=empty, mrna_raw_table=empty)
+            mutation_table = pd.DataFrame([["", ""]], index=["TP53"], columns=["S1", "S2"])
+            mrna_table = pd.DataFrame([[0.0, 0.0]], index=["MYC"], columns=["S1", "S2"])
+            return CbioPortalDataBundle(source=source, mutation_table=mutation_table, mrna_table=mrna_table, mrna_raw_table=mrna_table)
         source = CbioPortalDataSource(
             study=keep_study,
             sample_list_id="keep_tcga_gdc_all",
             sample_ids=("S1", "S2"),
-            mutation_profile=None,
-            mrna_profile=None,
-            mrna_raw_profile=None,
+            mutation_profile=CbioPortalProfile("keep_mutations", "keep_tcga_gdc", "MUTATION_EXTENDED", None, "Mutations"),
+            mrna_profile=CbioPortalProfile("keep_mrna", "keep_tcga_gdc", "MRNA_EXPRESSION", "RNA-Seq", "mRNA"),
+            mrna_raw_profile=CbioPortalProfile("keep_mrna_raw", "keep_tcga_gdc", "MRNA_EXPRESSION", "RNA-Seq", "mRNA raw"),
             mrna_transform=None,
             mutation_genes=("TP53",),
             mrna_genes=("MYC",),
