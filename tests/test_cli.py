@@ -10,15 +10,21 @@ from scipy.io import mmwrite
 from scipy.sparse import csr_matrix
 
 from geo_downloader.cbioportal import (
+    CbioPortalDataBundle,
+    CbioPortalDataSource,
     CbioPortalClient,
     CbioPortalProfile,
     CbioPortalStudy,
+    CbioPortalStudyReference,
+    CbioPortalStudySelection,
     build_cbioportal_study_index,
     build_cbioportal_data_source,
     compute_mutation_expression_associations,
     build_cbioportal_matrices,
     load_cbioportal_study_index,
-    plot_mutation_expression_relationships,
+    _format_gene_pair_label,
+    plot_mutation_expression_forest_summary,
+    plot_mutation_expression_violin_panels,
     plot_cbioportal_oncoplot,
     save_cbioportal_outputs,
     save_cbioportal_study_index,
@@ -388,9 +394,19 @@ def test_cbioportal_relationship_plot(tmp_path):
         mutation_genes=["TP53", "KRAS"],
         expression_genes=["TP53", "MYC"],
     )
-    plot_path = tmp_path / "relationship.png"
-    plot_mutation_expression_relationships(
-        plot_path,
+    violin_path = tmp_path / "violin.png"
+    forest_path = tmp_path / "forest.png"
+    plot_mutation_expression_violin_panels(
+        violin_path,
+        mutation_table=bundle.mutation_table,
+        mrna_table=bundle.mrna_table,
+        mrna_raw_table=bundle.mrna_raw_table,
+        source=bundle.source,
+        title="toy relationship",
+        association_table=association,
+    )
+    forest_paths = plot_mutation_expression_forest_summary(
+        forest_path,
         mutation_table=bundle.mutation_table,
         mrna_table=bundle.mrna_table,
         mrna_raw_table=bundle.mrna_raw_table,
@@ -399,7 +415,43 @@ def test_cbioportal_relationship_plot(tmp_path):
         association_table=association,
         summary_label="toy summary",
     )
-    assert plot_path.exists()
+    assert violin_path.exists()
+    assert sorted(path.name for path in forest_paths) == ["forest_KRAS.png", "forest_TP53.png"]
+    assert all(path.exists() for path in forest_paths)
+
+
+def test_cbioportal_gene_pair_label_formats_both_genes():
+    assert _format_gene_pair_label("STK11", "CD68") == "Mut: STK11 | Expr: CD68"
+    assert _format_gene_pair_label("TP53", "TP53") == "Gene: TP53"
+
+
+def test_cbioportal_forest_summary_marks_significant_pvalues(tmp_path):
+    client = FakeCbioPortalClient()
+    bundle = build_cbioportal_data_source(
+        client=client,
+        study_id="toy_study",
+        mutation_genes=["TP53", "KRAS"],
+        mrna_genes=["TP53", "MYC"],
+    )
+    association = compute_mutation_expression_associations(
+        bundle.mutation_table,
+        bundle.mrna_table,
+        mrna_raw_table=bundle.mrna_raw_table,
+        mutation_genes=["TP53", "KRAS"],
+        expression_genes=["TP53", "MYC"],
+    )
+    forest_path = tmp_path / "forest.png"
+    forest_paths = plot_mutation_expression_forest_summary(
+        forest_path,
+        mutation_table=bundle.mutation_table,
+        mrna_table=bundle.mrna_table,
+        mrna_raw_table=bundle.mrna_raw_table,
+        source=bundle.source,
+        association_table=association,
+        summary_label="toy summary",
+    )
+    assert sorted(path.name for path in forest_paths) == ["forest_KRAS.png", "forest_TP53.png"]
+    assert all(path.exists() for path in forest_paths)
 
 
 def test_cbioportal_coad_driver_mutations_and_expression(tmp_path):
@@ -552,11 +604,13 @@ def test_cbioportal_cli_smoke(tmp_path, monkeypatch):
             "--output-dir",
             str(tmp_path / "out"),
             "--output",
-            str(tmp_path / "out" / "toy_study" / "relationship.png"),
+            str(tmp_path / "out" / "toy_study" / "violin.png"),
         ]
     )
     assert rc == 0
-    assert (tmp_path / "out" / "toy_study" / "relationship.png").exists()
+    assert (tmp_path / "out" / "toy_study" / "violin.png").exists()
+    assert (tmp_path / "out" / "toy_study" / "forest_KRAS.png").exists()
+    assert (tmp_path / "out" / "toy_study" / "forest_TP53.png").exists()
     assert (tmp_path / "out" / "toy_study" / "oncoplot.png").exists()
     assert (tmp_path / "out" / "toy_study" / "mrna_raw.tsv").exists()
 
@@ -579,7 +633,9 @@ def test_cbioportal_cli_relationship_smoke(tmp_path, monkeypatch):
         ]
     )
     assert rc == 0
-    assert (tmp_path / "out" / "toy_study" / "relationship.png").exists()
+    assert (tmp_path / "out" / "toy_study" / "violin.png").exists()
+    assert (tmp_path / "out" / "toy_study" / "forest_KRAS.png").exists()
+    assert (tmp_path / "out" / "toy_study" / "forest_TP53.png").exists()
     assert (tmp_path / "out" / "toy_study" / "oncoplot.png").exists()
     assert (tmp_path / "out" / "toy_study" / "association.tsv").exists()
     assert (tmp_path / "out" / "toy_study" / "mrna_raw.tsv").exists()
@@ -611,10 +667,134 @@ def test_cbioportal_cli_uses_index_file_for_cancer_mode(tmp_path, monkeypatch):
     assert rc == 0
     assert (tmp_path / "out" / "luad_tcga_gdc" / "oncoplot.png").exists()
     assert (tmp_path / "out" / "luad_cptac_2020" / "oncoplot.png").exists()
-    assert (tmp_path / "out" / "luad_tcga_gdc" / "relationship.png").exists()
-    assert (tmp_path / "out" / "luad_cptac_2020" / "relationship.png").exists()
+    assert (tmp_path / "out" / "luad_tcga_gdc" / "violin.png").exists()
+    assert (tmp_path / "out" / "luad_cptac_2020" / "violin.png").exists()
+    assert (tmp_path / "out" / "luad_tcga_gdc" / "forest_KRAS.png").exists()
+    assert (tmp_path / "out" / "luad_cptac_2020" / "forest_KRAS.png").exists()
+    assert (tmp_path / "out" / "luad_tcga_gdc" / "forest_TP53.png").exists()
+    assert (tmp_path / "out" / "luad_cptac_2020" / "forest_TP53.png").exists()
     assert (tmp_path / "out" / "luad_tcga_gdc" / "mrna_raw.tsv").exists()
     assert (tmp_path / "out" / "luad_cptac_2020" / "mrna_raw.tsv").exists()
+
+
+def test_cbioportal_cli_all_cancers_mode(tmp_path, monkeypatch):
+    client = FakeCbioPortalClient()
+    monkeypatch.setattr("geo_downloader.cbioportal_index_cli.CbioPortalClient", lambda base_url: client)
+    index_path = tmp_path / "index.json"
+    rc = cbioportal_index_main(["--output", str(index_path)])
+    assert rc == 0
+    assert index_path.exists()
+
+    monkeypatch.setattr("geo_downloader.cbioportal_cli.CbioPortalClient", lambda base_url: client)
+    rc = cbioportal_main(
+        [
+            "--all-cancers",
+            "--mutation-genes",
+            "TP53,KRAS",
+            "--mrna-genes",
+            "TP53,MYC",
+            "--index-file",
+            str(index_path),
+            "--output-dir",
+            str(tmp_path / "all"),
+        ]
+    )
+    assert rc == 0
+    assert (tmp_path / "all" / "luad_tcga_gdc" / "violin.png").exists()
+    assert (tmp_path / "all" / "luad_tcga_gdc" / "forest_TP53.png").exists()
+    assert (tmp_path / "all" / "luad_cptac_2020" / "forest_KRAS.png").exists()
+    assert (tmp_path / "all" / "brca_tcga_gdc" / "violin.png").exists()
+
+
+def test_cbioportal_cli_all_cancers_skips_empty_associations(tmp_path, monkeypatch):
+    index_path = tmp_path / "index.json"
+    index_path.write_text("{}", encoding="utf-8")
+
+    skip_study = CbioPortalStudy(study_id="skip_tcga_gdc", name="Skip Cancer (TCGA GDC, 2025)")
+    keep_study = CbioPortalStudy(study_id="keep_tcga_gdc", name="Keep Cancer (TCGA GDC, 2025)")
+    skip_record = CbioPortalStudyReference(
+        role="tcga_gdc_2025",
+        study=skip_study,
+        sample_list_id="skip_tcga_gdc_all",
+        sample_count=2,
+        mutation_profile_id="skip_mutations",
+        mrna_profile_id="skip_mrna",
+    )
+    keep_record = CbioPortalStudyReference(
+        role="tcga_gdc_2025",
+        study=keep_study,
+        sample_list_id="keep_tcga_gdc_all",
+        sample_count=2,
+        mutation_profile_id="keep_mutations",
+        mrna_profile_id="keep_mrna",
+    )
+    skip_selection = CbioPortalStudySelection(
+        cancer_query="skip",
+        study_ids=("skip_tcga_gdc",),
+        studies=(skip_study,),
+        study_records=(skip_record,),
+    )
+    keep_selection = CbioPortalStudySelection(
+        cancer_query="keep",
+        study_ids=("keep_tcga_gdc",),
+        studies=(keep_study,),
+        study_records=(keep_record,),
+    )
+
+    def fake_resolve_all_studies_from_index(_index):
+        return (skip_selection, keep_selection)
+
+    def fake_build_cbioportal_data_source(*, study_id: str, **_kwargs):
+        if study_id == "skip_tcga_gdc":
+            source = CbioPortalDataSource(
+                study=skip_study,
+                sample_list_id="skip_tcga_gdc_all",
+                sample_ids=("S1", "S2"),
+                mutation_profile=None,
+                mrna_profile=None,
+                mrna_raw_profile=None,
+                mrna_transform=None,
+                mutation_genes=("TP53",),
+                mrna_genes=("MYC",),
+            )
+            empty = pd.DataFrame(index=[], columns=["S1", "S2"])
+            return CbioPortalDataBundle(source=source, mutation_table=empty, mrna_table=empty, mrna_raw_table=empty)
+        source = CbioPortalDataSource(
+            study=keep_study,
+            sample_list_id="keep_tcga_gdc_all",
+            sample_ids=("S1", "S2"),
+            mutation_profile=None,
+            mrna_profile=None,
+            mrna_raw_profile=None,
+            mrna_transform=None,
+            mutation_genes=("TP53",),
+            mrna_genes=("MYC",),
+        )
+        mutation_table = pd.DataFrame([["Missense_Mutation", ""]], index=["TP53"], columns=["S1", "S2"])
+        mrna_table = pd.DataFrame([[1.0, 0.0]], index=["MYC"], columns=["S1", "S2"])
+        return CbioPortalDataBundle(source=source, mutation_table=mutation_table, mrna_table=mrna_table, mrna_raw_table=mrna_table)
+
+    monkeypatch.setattr("geo_downloader.cbioportal_cli.load_cbioportal_study_index", lambda path: object())
+    monkeypatch.setattr("geo_downloader.cbioportal_cli.resolve_all_studies_from_index", fake_resolve_all_studies_from_index)
+    monkeypatch.setattr("geo_downloader.cbioportal_cli.build_cbioportal_data_source", fake_build_cbioportal_data_source)
+
+    rc = cbioportal_main(
+        [
+            "--all-cancers",
+            "--mutation-genes",
+            "TP53",
+            "--mrna-genes",
+            "MYC",
+            "--index-file",
+            str(index_path),
+            "--output-dir",
+            str(tmp_path / "all"),
+        ]
+    )
+    assert rc == 0
+    assert not (tmp_path / "all" / "skip_tcga_gdc").exists()
+    assert (tmp_path / "all" / "keep_tcga_gdc" / "violin.png").exists()
+    assert (tmp_path / "all" / "keep_tcga_gdc" / "forest_TP53.png").exists()
 
 
 def test_smoke_cbioportal_coad_script_smoke(tmp_path, monkeypatch):
@@ -630,7 +810,9 @@ def test_smoke_cbioportal_coad_script_smoke(tmp_path, monkeypatch):
     )
     assert rc == 0
     assert (tmp_path / "smoke" / "coadread_tcga_pan_can_atlas_2018" / "oncoplot.png").exists()
-    assert (tmp_path / "smoke" / "coadread_tcga_pan_can_atlas_2018" / "relationship.png").exists()
+    assert (tmp_path / "smoke" / "coadread_tcga_pan_can_atlas_2018" / "violin.png").exists()
+    assert (tmp_path / "smoke" / "coadread_tcga_pan_can_atlas_2018" / "forest_APC.png").exists()
+    assert (tmp_path / "smoke" / "coadread_tcga_pan_can_atlas_2018" / "forest_FBXW7.png").exists()
     assert (tmp_path / "smoke" / "coadread_tcga_pan_can_atlas_2018" / "association.tsv").exists()
     assert (tmp_path / "smoke" / "coadread_tcga_pan_can_atlas_2018" / "mrna_raw.tsv").exists()
 
@@ -647,7 +829,9 @@ def test_smoke_cbioportal_luad_script_smoke(tmp_path, monkeypatch):
     assert rc == 0
     output_dir = tmp_path / "smoke-luad" / "luad_tcga"
     assert (output_dir / "oncoplot.png").exists()
-    assert (output_dir / "relationship.png").exists()
+    assert (output_dir / "violin.png").exists()
+    assert (output_dir / "forest_STK11.png").exists()
+    assert (output_dir / "forest_KRAS.png").exists()
     assert (output_dir / "association.tsv").exists()
     assert (output_dir / "mrna_raw.tsv").exists()
 
@@ -668,7 +852,10 @@ def test_smoke_cbioportal_luad_cptac_script_smoke(tmp_path, monkeypatch):
     assert rc == 0
     output_dir = tmp_path / "smoke-luad-cptac" / "luad_cptac_2020"
     assert (output_dir / "oncoplot.png").exists()
-    assert (output_dir / "relationship.png").exists()
+    assert (output_dir / "violin.png").exists()
+    assert (output_dir / "forest_STK11.png").exists()
+    assert (output_dir / "forest_KRAS.png").exists()
+    assert (output_dir / "forest_TP53.png").exists()
     assert (output_dir / "association.tsv").exists()
     assert (output_dir / "mrna_raw.tsv").exists()
     assert (output_dir / "source.json").exists()

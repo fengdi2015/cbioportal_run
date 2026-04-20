@@ -8,8 +8,9 @@ from geo_downloader.cbioportal import (
     CbioPortalClient,
     build_cbioportal_data_source,
     compute_mutation_expression_associations,
+    plot_mutation_expression_forest_summary,
+    plot_mutation_expression_violin_panels,
     plot_cbioportal_oncoplot,
-    plot_mutation_expression_relationships,
     save_cbioportal_outputs,
 )
 
@@ -85,7 +86,8 @@ def main(argv: list[str] | None = None) -> int:
 
         output_dir = args.output_dir / study.study_id
         heatmap_path = output_dir / "oncoplot.png"
-        relationship_path = output_dir / "relationship.png"
+        violin_path = output_dir / "violin.png"
+        forest_path = output_dir / "forest.png"
         plot_cbioportal_oncoplot(
             output_path=heatmap_path,
             mutation_table=mutation_table,
@@ -101,13 +103,23 @@ def main(argv: list[str] | None = None) -> int:
             mrna_table,
             mrna_raw_table=mrna_raw_table,
         )
-        plot_mutation_expression_relationships(
-            output_path=relationship_path,
+        plot_mutation_expression_violin_panels(
+            output_path=violin_path,
             mutation_table=mutation_table,
             mrna_table=mrna_table,
             mrna_raw_table=mrna_raw_table,
             source=bundle.source,
             title=f"{study.study_id} mutation-expression relationships",
+            association_table=association_table,
+            presentation=True,
+        )
+        forest_plot_paths = plot_mutation_expression_forest_summary(
+            output_path=forest_path,
+            mutation_table=mutation_table,
+            mrna_table=mrna_table,
+            mrna_raw_table=mrna_raw_table,
+            source=bundle.source,
+            title=f"{study.study_id} mutation-expression summary",
             association_table=association_table,
             summary_label="COAD mutation-expression summary (log2(TPM))",
             presentation=True,
@@ -120,7 +132,8 @@ def main(argv: list[str] | None = None) -> int:
             mutation_table=mutation_table,
             mrna_table=mrna_table,
             mrna_raw_table=mrna_raw_table,
-            output_plot=relationship_path,
+            output_plot=violin_path,
+            forest_plot_paths=forest_plot_paths,
             association_table=association_table,
             source=bundle.source,
         )
@@ -129,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sample list: {result.sample_list_id}")
         print(f"samples: {len(result.sample_ids)}")
         print(f"wrote: {result.output_plot}")
+        for path in forest_plot_paths:
+            print(f"wrote: {path}")
         print(f"wrote: {heatmap_path}")
         print(f"wrote: {result.mutation_table_path}")
         print(f"wrote: {result.mrna_table_path}")

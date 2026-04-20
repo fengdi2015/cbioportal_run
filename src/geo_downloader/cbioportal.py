@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import requests
+from matplotlib.gridspec import GridSpecFromSubplotSpec
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 from scipy.stats import mannwhitneyu
 
@@ -211,6 +212,7 @@ class CbioPortalPlotResult:
     samples_path: Path
     association_table_path: Path | None = None
     source_path: Path | None = None
+    forest_plot_paths: tuple[Path, ...] | None = None
 
 
 class CbioPortalClient:
@@ -530,6 +532,23 @@ def resolve_studies_for_cancer_from_index(
     return None
 
 
+def resolve_all_studies_from_index(study_index: CbioPortalStudyIndex) -> tuple[CbioPortalStudySelection, ...]:
+    selections: list[CbioPortalStudySelection] = []
+    for entry in study_index.entries:
+        studies = tuple(record.study for record in entry.study_records)
+        if not studies:
+            continue
+        selections.append(
+            CbioPortalStudySelection(
+                cancer_query=entry.cancer_id,
+                study_ids=tuple(study.study_id for study in studies),
+                studies=studies,
+                study_records=entry.study_records,
+            )
+        )
+    return tuple(selections)
+
+
 def _build_study_reference(client: CbioPortalClient, study: CbioPortalStudy, role: str) -> CbioPortalStudyReference:
     sample_list_id = client.resolve_sample_list_id(study.study_id)
     sample_ids = client.get_sample_list(sample_list_id)
@@ -746,6 +765,7 @@ def save_cbioportal_outputs(
     mutation_table: pd.DataFrame,
     mrna_table: pd.DataFrame,
     output_plot: Path,
+    forest_plot_paths: list[Path] | tuple[Path, ...] | None = None,
     mrna_raw_table: pd.DataFrame | None = None,
     association_table: pd.DataFrame | None = None,
     source: CbioPortalDataSource | None = None,
@@ -780,6 +800,7 @@ def save_cbioportal_outputs(
         samples_path=samples_path,
         association_table_path=association_table_path,
         source_path=source_path,
+        forest_plot_paths=tuple(forest_plot_paths) if forest_plot_paths is not None else None,
     )
 
 
@@ -898,7 +919,7 @@ def compute_mutation_expression_associations(
     return pd.DataFrame(rows)
 
 
-def plot_mutation_expression_relationships(
+def plot_mutation_expression_violin_panels(
     output_path: Path,
     mutation_table: pd.DataFrame,
     mrna_table: pd.DataFrame,
@@ -906,14 +927,12 @@ def plot_mutation_expression_relationships(
     source: CbioPortalDataSource | None = None,
     title: str | None = None,
     association_table: pd.DataFrame | None = None,
-    summary_label: str = "Mutation-expression summary",
     presentation: bool = True,
-    n_bootstrap: int = 400,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     source_table = mrna_raw_table if mrna_raw_table is not None else mrna_table
     if mutation_table.empty or source_table.empty:
-        raise ValueError("both mutation_table and mrna_table must contain data for relationship plotting")
+        raise ValueError("both mutation_table and mrna_table must contain data for violin plotting")
 
     mutation_genes = list(mutation_table.index)
     expression_genes = list(source_table.index)
@@ -925,15 +944,15 @@ def plot_mutation_expression_relationships(
     if association_table.empty:
         raise ValueError("no mutation-expression associations available to plot")
 
-    n_rows = len(mutation_genes) + 1
+    n_rows = len(mutation_genes)
     n_cols = max(1, len(expression_genes))
-    fig_width = 3.8 * n_cols if presentation else max(10.0, 3.2 * n_cols)
-    fig_height = 2.7 * len(mutation_genes) + max(2.8, 0.42 * len(association_table) + 1.2)
+    fig_width = (1.4 + 3.0 * n_cols) if presentation else max(11.0, 3.2 * n_cols + 1.2)
+    fig_height = max(2.8, 2.7 * len(mutation_genes))
     fig = plt.figure(figsize=(fig_width, fig_height))
     gs = fig.add_gridspec(
         nrows=n_rows,
-        ncols=n_cols,
-        height_ratios=[1.0] * len(mutation_genes) + [max(1.6, 0.4 * len(association_table))],
+        ncols=n_cols + 1,
+        width_ratios=[0.95] + [1.0] * n_cols,
         hspace=0.6,
         wspace=0.35,
     )
@@ -944,9 +963,11 @@ def plot_mutation_expression_relationships(
     }
     rng = np.random.default_rng(42)
     for row_index, mutation_gene in enumerate(mutation_genes):
+        label_ax = fig.add_subplot(gs[row_index, 0])
+        _draw_label_column(label_ax, mutation_gene)
         mutation_mask = mutation_table.loc[mutation_gene].map(_is_mutated).astype(bool)
         for col_index, expression_gene in enumerate(expression_genes):
-            ax = fig.add_subplot(gs[row_index, col_index])
+            ax = fig.add_subplot(gs[row_index, col_index + 1])
             values = pd.to_numeric(source_table.loc[expression_gene], errors="coerce")
             wt = values[~mutation_mask].dropna().to_numpy(dtype=float)
             mut = values[mutation_mask].dropna().to_numpy(dtype=float)
@@ -978,28 +999,191 @@ def plot_mutation_expression_relationships(
             ax.set_xticks([0, 1])
             ax.set_xticklabels([f"WT (n={len(wt)})", f"Mut (n={len(mut)})"], fontsize=8, rotation=0)
 
-    summary_ax = fig.add_subplot(gs[len(mutation_genes), :])
-    _draw_forest_summary_panel(
-        summary_ax,
-        association_table=association_table,
-        mutation_table=mutation_table,
-        mrna_table=source_table,
-        mutation_palette=mutation_palette,
-        n_bootstrap=n_bootstrap,
-        summary_label=summary_label,
-    )
-
     if title:
         fig.suptitle(title, fontsize=14, y=0.995)
     footer = _format_source_footer(source)
     if footer:
         fig.text(0.01, 0.01, footer, fontsize=8, ha="left", va="bottom")
-    else:
-        pass
-    fig.subplots_adjust(left=0.07, right=0.99, top=0.95, bottom=0.08, hspace=0.7, wspace=0.35)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.90, bottom=0.08, hspace=0.7, wspace=0.35)
     fig.savefig(output_path, dpi=220 if presentation else 200, bbox_inches="tight")
     plt.close(fig)
     return output_path
+
+
+def plot_mutation_expression_forest_summary(
+    output_path: Path,
+    mutation_table: pd.DataFrame,
+    mrna_table: pd.DataFrame,
+    mrna_raw_table: pd.DataFrame | None = None,
+    source: CbioPortalDataSource | None = None,
+    title: str | None = None,
+    association_table: pd.DataFrame | None = None,
+    summary_label: str = "Mutation-expression summary",
+    presentation: bool = True,
+    n_bootstrap: int = 400,
+) -> list[Path]:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    source_table = mrna_raw_table if mrna_raw_table is not None else mrna_table
+    if mutation_table.empty or source_table.empty:
+        raise ValueError("both mutation_table and mrna_table must contain data for forest plotting")
+
+    mutation_genes = list(mutation_table.index)
+    association_table = association_table if association_table is not None else compute_mutation_expression_associations(
+        mutation_table,
+        mrna_table,
+        mrna_raw_table=source_table,
+    )
+    if association_table.empty:
+        raise ValueError("no mutation-expression associations available to plot")
+
+    generated_paths: list[Path] = []
+    ordered = association_table.sort_values(["mutation_gene", "delta_median", "expression_gene"], ascending=[True, False, True]).copy()
+    mutation_palette = {
+        gene: color
+        for gene, color in zip(mutation_genes, plt.cm.Set2(np.linspace(0, 1, max(len(mutation_genes), 3))))
+    }
+
+    for mutation_gene in mutation_genes:
+        gene_rows: list[dict[str, Any]] = []
+        for _, row in ordered[ordered["mutation_gene"] == mutation_gene].iterrows():
+            expression_gene = str(row["expression_gene"])
+            mutation_mask = mutation_table.loc[mutation_gene].map(_is_mutated).astype(bool)
+            expression = pd.to_numeric(source_table.loc[expression_gene], errors="coerce")
+            mutated = expression[mutation_mask].dropna().to_numpy(dtype=float)
+            wild_type = expression[~mutation_mask].dropna().to_numpy(dtype=float)
+            if mutated.size == 0 or wild_type.size == 0:
+                continue
+            ci_low, ci_high = _bootstrap_delta_median_ci(
+                mutated,
+                wild_type,
+                n_bootstrap=n_bootstrap,
+                seed=abs(hash((mutation_gene, expression_gene))) % (2**32),
+            )
+            gene_rows.append(
+                {
+                    "mutation_gene": mutation_gene,
+                    "expression_gene": expression_gene,
+                    "delta_median": float(row["delta_median"]),
+                    "ci_low": float(ci_low),
+                    "ci_high": float(ci_high),
+                    "p_value": float(row["p_value"]),
+                }
+            )
+
+        if not gene_rows:
+            continue
+
+        plot_rows = sorted(gene_rows, key=lambda item: item["delta_median"], reverse=True)
+        y_positions = np.arange(len(plot_rows))[::-1]
+        fig_width = max(11.0, 8.5 if presentation else 10.0)
+        fig_height = max(2.8, 0.45 * len(plot_rows) + 2.0)
+        fig = plt.figure(figsize=(fig_width, fig_height))
+        gs = fig.add_gridspec(1, 2, width_ratios=[0.95, 4.2], wspace=0.03)
+        label_ax = fig.add_subplot(gs[0, 0])
+        ax = fig.add_subplot(gs[0, 1])
+
+        for y, row in zip(y_positions, plot_rows):
+            color = mutation_palette.get(mutation_gene, "#e45756")
+            ax.errorbar(
+                row["delta_median"],
+                y,
+                xerr=[[row["delta_median"] - row["ci_low"]], [row["ci_high"] - row["delta_median"]]],
+                fmt="o",
+                color=color,
+                ecolor=color,
+                elinewidth=1.2,
+                capsize=3,
+                markersize=5,
+            )
+            significance = " *" if row["p_value"] < 0.05 else ""
+            ax.text(
+                0.01,
+                y,
+                f"Expr: {row['expression_gene']}  p={row['p_value']:.2g}{significance}",
+                transform=ax.get_yaxis_transform(),
+                ha="left",
+                va="center",
+                fontsize=8,
+            )
+
+        _draw_label_column(label_ax, mutation_gene, header="Mutation gene")
+        ax.axvline(0.0, color="#666666", linestyle="--", linewidth=1.0)
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels([])
+        ax.set_xlabel("Delta median mRNA Z-score (mutant - wild-type)")
+        ax.set_title(summary_label, fontsize=10)
+        ax.grid(axis="x", color="#eeeeee", linewidth=0.6)
+        ax.set_ylim(-1, len(plot_rows))
+        label_ax.set_ylim(ax.get_ylim())
+        if title:
+            fig.suptitle(f"{title} - {mutation_gene}", fontsize=14, y=0.995)
+        footer = _format_source_footer(source)
+        if footer:
+            fig.text(0.01, 0.01, footer, fontsize=8, ha="left", va="bottom")
+        gene_path = output_path.with_name(f"{output_path.stem}_{mutation_gene}{output_path.suffix}")
+        fig.subplots_adjust(left=0.07, right=0.99, top=0.90, bottom=0.08, wspace=0.35)
+        fig.savefig(gene_path, dpi=220 if presentation else 200, bbox_inches="tight")
+        plt.close(fig)
+        generated_paths.append(gene_path)
+
+    if not generated_paths:
+        raise ValueError("no mutation-expression associations available to plot")
+    return generated_paths
+
+
+def plot_mutation_expression_relationships(
+    output_path: Path,
+    mutation_table: pd.DataFrame,
+    mrna_table: pd.DataFrame,
+    mrna_raw_table: pd.DataFrame | None = None,
+    source: CbioPortalDataSource | None = None,
+    title: str | None = None,
+    association_table: pd.DataFrame | None = None,
+    summary_label: str = "Mutation-expression summary",
+    presentation: bool = True,
+    n_bootstrap: int = 400,
+) -> Path:
+    violin_path = output_path
+    forest_path = output_path.with_name(f"{output_path.stem}_forest{output_path.suffix}")
+    plot_mutation_expression_violin_panels(
+        violin_path,
+        mutation_table=mutation_table,
+        mrna_table=mrna_table,
+        mrna_raw_table=mrna_raw_table,
+        source=source,
+        title=title,
+        association_table=association_table,
+        presentation=presentation,
+    )
+    plot_mutation_expression_forest_summary(
+        forest_path,
+        mutation_table=mutation_table,
+        mrna_table=mrna_table,
+        mrna_raw_table=mrna_raw_table,
+        source=source,
+        title=title,
+        association_table=association_table,
+        summary_label=summary_label,
+        presentation=presentation,
+        n_bootstrap=n_bootstrap,
+    )
+    return violin_path
+
+
+def _format_gene_pair_label(mutation_gene: str, expression_gene: str) -> str:
+    if mutation_gene == expression_gene:
+        return f"Gene: {mutation_gene}"
+    return f"Mut: {mutation_gene} | Expr: {expression_gene}"
+
+
+def _draw_label_column(ax: plt.Axes, label: str | None = None, header: str | None = None) -> None:
+    ax.set_axis_off()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    if header:
+        ax.text(0.55, 0.99, header, transform=ax.transAxes, ha="center", va="top", fontsize=8, fontweight="bold")
+    if label:
+        ax.text(0.55, 0.5, label, transform=ax.transAxes, ha="center", va="center", fontsize=11, fontweight="bold")
 
 
 def _draw_violin_jitter_panel(
@@ -1010,7 +1194,7 @@ def _draw_violin_jitter_panel(
     expression_gene: str,
     mutation_color: str,
 ) -> None:
-    ax.set_title(f"{mutation_gene} vs {expression_gene}", fontsize=9)
+    ax.set_title(f"Expr: {expression_gene}", fontsize=10, fontweight="bold", pad=16)
     if wild_type.size == 0 and mutant.size == 0:
         ax.text(0.5, 0.5, "no data", transform=ax.transAxes, ha="center", va="center", fontsize=9)
         ax.set_xticks([0, 1])
@@ -1054,6 +1238,7 @@ def _draw_violin_jitter_panel(
 
 
 def _draw_forest_summary_panel(
+    label_ax: plt.Axes,
     ax: plt.Axes,
     association_table: pd.DataFrame,
     mutation_table: pd.DataFrame,
@@ -1076,7 +1261,7 @@ def _draw_forest_summary_panel(
         ci_low, ci_high = _bootstrap_delta_median_ci(mutated, wild_type, n_bootstrap=n_bootstrap, seed=abs(hash((mutation_gene, expression_gene))) % (2**32))
         rows.append(
             {
-                "label": f"{mutation_gene} vs {expression_gene}",
+                "label": _format_gene_pair_label(mutation_gene, expression_gene),
                 "mutation_gene": mutation_gene,
                 "expression_gene": expression_gene,
                 "delta_median": float(row["delta_median"]),
@@ -1087,14 +1272,17 @@ def _draw_forest_summary_panel(
         )
 
     if not rows:
+        _draw_label_column(label_ax, header="Mutation gene")
         ax.text(0.5, 0.5, "no summary data", transform=ax.transAxes, ha="center", va="center")
         ax.set_axis_off()
         return
 
     plot_rows = sorted(rows, key=lambda item: (item["mutation_gene"], item["delta_median"], item["expression_gene"]))
     y_positions = np.arange(len(plot_rows))[::-1]
+    group_positions: dict[str, list[float]] = {}
     for y, row in zip(y_positions, plot_rows):
         color = mutation_palette.get(row["mutation_gene"], "#e45756")
+        group_positions.setdefault(row["mutation_gene"], []).append(float(y))
         ax.errorbar(
             row["delta_median"],
             y,
@@ -1109,13 +1297,14 @@ def _draw_forest_summary_panel(
         ax.text(
             0.01,
             y,
-            f"{row['label']}  p={row['p_value']:.2g}",
+            f"Expr: {row['expression_gene']}  p={row['p_value']:.2g}",
             transform=ax.get_yaxis_transform(),
             ha="left",
             va="center",
             fontsize=8,
         )
 
+    _draw_label_column(label_ax, header="Mutation gene")
     ax.axvline(0.0, color="#666666", linestyle="--", linewidth=1.0)
     ax.set_yticks(y_positions)
     ax.set_yticklabels([])
@@ -1123,6 +1312,18 @@ def _draw_forest_summary_panel(
     ax.set_title(summary_label, fontsize=10)
     ax.grid(axis="x", color="#eeeeee", linewidth=0.6)
     ax.set_ylim(-1, len(plot_rows))
+    label_ax.set_ylim(ax.get_ylim())
+    for mutation_gene, positions in group_positions.items():
+        label_ax.text(
+            0.55,
+            float(np.mean(positions)),
+            mutation_gene,
+            transform=label_ax.get_yaxis_transform(),
+            ha="center",
+            va="center",
+            fontsize=8.5,
+            fontweight="bold",
+        )
 
 
 def _bootstrap_delta_median_ci(
