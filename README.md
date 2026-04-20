@@ -129,6 +129,20 @@ cbioportal-plot \
   --output-dir downloads/cbioportal
 ```
 
+For a latest pan-cancer run across every cancer family in the frozen index, use `--all-cancers`. This mode runs the TCGA GDC 2025 study for each cancer family first and adds the matching CPTAC study when available:
+
+```bash
+cbioportal-plot \
+  --all-cancers \
+  --mutation-genes TP53,KRAS \
+  --mrna-genes CD3D,CD68,FAP,CD8B,CD79A \
+  --presentation \
+  --index-file src/geo_downloader/cbioportal_study_index.json \
+  --output-dir downloads/cbioportal-pan-cancer
+```
+
+The all-cancers workflow skips studies that do not have usable mutation-expression associations and keeps going, so one empty study will not stop the rest of the run.
+
 If you maintain your own frozen index, point the plotter at it with `--index-file`.
 
 The default presentation mode now writes both a heatmap and a relationship figure. The relationship figure uses raw log2 expression values for the box/violin statistics and forest summary, while the heatmap keeps the display-scale z-scores:
