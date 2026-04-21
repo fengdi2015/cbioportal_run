@@ -284,7 +284,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 def _has_any_mutation_signal(mutation_table: pd.DataFrame) -> bool:
     if mutation_table.empty:
         return False
-    mutated = mutation_table.applymap(_is_mutated)
+    mutated = mutation_table.map(_is_mutated)
     return bool(mutated.to_numpy(dtype=bool).any())
 
 
