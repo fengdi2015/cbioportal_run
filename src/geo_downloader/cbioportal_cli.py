@@ -177,8 +177,9 @@ def main(argv: Iterable[str] | None = None) -> int:
                     heatmap_plot_path = output_dir / "heatmap.png"
                 association_table = None
                 mutation_signal_summary = _mutation_signal_summary(mutation_table)
+                mrna_signal_summary = _mrna_signal_summary(mrna_raw_table)
                 if args.figure_style == "relationship":
-                    if mutation_signal_summary["mutated_cells"] == 0 or mrna_raw_table.empty:
+                    if mutation_signal_summary["mutated_cells"] == 0 or mrna_signal_summary["observed_cells"] == 0:
                         if args.all_cancers:
                             print(
                                 "skip: "
@@ -186,7 +187,10 @@ def main(argv: Iterable[str] | None = None) -> int:
                                 f"mutation_genes_with_signal={mutation_signal_summary['mutation_genes_with_signal']}/"
                                 f"{mutation_signal_summary['mutation_genes_total']} "
                                 f"mutated_cells={mutation_signal_summary['mutated_cells']} "
-                                f"expression_table={'present' if not mrna_raw_table.empty else 'empty'}"
+                                f"mrna_genes_with_signal={mrna_signal_summary['genes_with_signal']}/"
+                                f"{mrna_signal_summary['genes_total']} "
+                                f"mrna_cells={mrna_signal_summary['observed_cells']} "
+                                f"mrna_profile={'present' if bundle.source.mrna_profile is not None else 'missing'}"
                             )
                             continue
                         print("error: relationship figure requires both mutation and expression tables", file=sys.stderr)
@@ -307,6 +311,22 @@ def _mutation_signal_summary(mutation_table: pd.DataFrame) -> dict[str, int]:
         "mutation_genes_total": int(mutated.shape[0]),
         "mutation_genes_with_signal": int(mutated.any(axis=1).sum()),
         "mutated_cells": int(mutated.to_numpy(dtype=bool).sum()),
+    }
+
+
+def _mrna_signal_summary(mrna_table: pd.DataFrame) -> dict[str, int]:
+    if mrna_table.empty:
+        return {
+            "genes_total": 0,
+            "genes_with_signal": 0,
+            "observed_cells": 0,
+        }
+    numeric = mrna_table.apply(pd.to_numeric, errors="coerce")
+    observed = numeric.notna()
+    return {
+        "genes_total": int(observed.shape[0]),
+        "genes_with_signal": int(observed.any(axis=1).sum()),
+        "observed_cells": int(observed.to_numpy(dtype=bool).sum()),
     }
 
 
