@@ -176,11 +176,18 @@ def main(argv: Iterable[str] | None = None) -> int:
                 if args.figure_style == "relationship" and violin_plot_path == heatmap_plot_path:
                     heatmap_plot_path = output_dir / "heatmap.png"
                 association_table = None
-                has_mutation_signal = _has_any_mutation_signal(mutation_table)
+                mutation_signal_summary = _mutation_signal_summary(mutation_table)
                 if args.figure_style == "relationship":
-                    if not has_mutation_signal or mrna_raw_table.empty:
+                    if mutation_signal_summary["mutated_cells"] == 0 or mrna_raw_table.empty:
                         if args.all_cancers:
-                            print(f"skip: {study.study_id} has no usable mutation signal or expression table")
+                            print(
+                                "skip: "
+                                f"{study.study_id} "
+                                f"mutation_genes_with_signal={mutation_signal_summary['mutation_genes_with_signal']}/"
+                                f"{mutation_signal_summary['mutation_genes_total']} "
+                                f"mutated_cells={mutation_signal_summary['mutated_cells']} "
+                                f"expression_table={'present' if not mrna_raw_table.empty else 'empty'}"
+                            )
                             continue
                         print("error: relationship figure requires both mutation and expression tables", file=sys.stderr)
                         return 1
@@ -286,6 +293,21 @@ def _has_any_mutation_signal(mutation_table: pd.DataFrame) -> bool:
         return False
     mutated = mutation_table.map(_is_mutated)
     return bool(mutated.to_numpy(dtype=bool).any())
+
+
+def _mutation_signal_summary(mutation_table: pd.DataFrame) -> dict[str, int]:
+    if mutation_table.empty:
+        return {
+            "mutation_genes_total": 0,
+            "mutation_genes_with_signal": 0,
+            "mutated_cells": 0,
+        }
+    mutated = mutation_table.map(_is_mutated)
+    return {
+        "mutation_genes_total": int(mutated.shape[0]),
+        "mutation_genes_with_signal": int(mutated.any(axis=1).sum()),
+        "mutated_cells": int(mutated.to_numpy(dtype=bool).sum()),
+    }
 
 
 if __name__ == "__main__":
