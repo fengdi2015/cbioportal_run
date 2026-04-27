@@ -893,11 +893,11 @@ def compute_mutation_expression_associations(
     for mutation_gene in mutation_genes:
         if mutation_gene not in mutation_table.index:
             continue
-        mutation_mask = mutation_table.loc[mutation_gene].map(_is_mutated).astype(bool)
+        mutation_mask = _gene_row(mutation_table, mutation_gene).map(_is_mutated).astype(bool)
         for expression_gene in expression_genes:
             if expression_gene not in source_table.index:
                 continue
-            expression = pd.to_numeric(source_table.loc[expression_gene], errors="coerce")
+            expression = pd.to_numeric(_gene_row(source_table, expression_gene), errors="coerce")
             mutated = expression[mutation_mask].dropna()
             wild_type = expression[~mutation_mask].dropna()
             if mutated.empty or wild_type.empty:
@@ -965,10 +965,10 @@ def plot_mutation_expression_violin_panels(
     for row_index, mutation_gene in enumerate(mutation_genes):
         label_ax = fig.add_subplot(gs[row_index, 0])
         _draw_label_column(label_ax, mutation_gene)
-        mutation_mask = mutation_table.loc[mutation_gene].map(_is_mutated).astype(bool)
+        mutation_mask = _gene_row(mutation_table, mutation_gene).map(_is_mutated).astype(bool)
         for col_index, expression_gene in enumerate(expression_genes):
             ax = fig.add_subplot(gs[row_index, col_index + 1])
-            values = pd.to_numeric(source_table.loc[expression_gene], errors="coerce")
+            values = pd.to_numeric(_gene_row(source_table, expression_gene), errors="coerce")
             wt = values[~mutation_mask].dropna().to_numpy(dtype=float)
             mut = values[mutation_mask].dropna().to_numpy(dtype=float)
             _draw_violin_jitter_panel(
@@ -1047,8 +1047,8 @@ def plot_mutation_expression_forest_summary(
         gene_rows: list[dict[str, Any]] = []
         for _, row in ordered[ordered["mutation_gene"] == mutation_gene].iterrows():
             expression_gene = str(row["expression_gene"])
-            mutation_mask = mutation_table.loc[mutation_gene].map(_is_mutated).astype(bool)
-            expression = pd.to_numeric(source_table.loc[expression_gene], errors="coerce")
+            mutation_mask = _gene_row(mutation_table, mutation_gene).map(_is_mutated).astype(bool)
+            expression = pd.to_numeric(_gene_row(source_table, expression_gene), errors="coerce")
             mutated = expression[mutation_mask].dropna().to_numpy(dtype=float)
             wild_type = expression[~mutation_mask].dropna().to_numpy(dtype=float)
             if mutated.size == 0 or wild_type.size == 0:
@@ -1252,8 +1252,8 @@ def _draw_forest_summary_panel(
     for _, row in ordered.iterrows():
         mutation_gene = str(row["mutation_gene"])
         expression_gene = str(row["expression_gene"])
-        mutation_mask = mutation_table.loc[mutation_gene].map(_is_mutated).astype(bool)
-        expression = pd.to_numeric(mrna_table.loc[expression_gene], errors="coerce")
+        mutation_mask = _gene_row(mutation_table, mutation_gene).map(_is_mutated).astype(bool)
+        expression = pd.to_numeric(_gene_row(mrna_table, expression_gene), errors="coerce")
         mutated = expression[mutation_mask].dropna().to_numpy(dtype=float)
         wild_type = expression[~mutation_mask].dropna().to_numpy(dtype=float)
         if mutated.size == 0 or wild_type.size == 0:
@@ -1542,3 +1542,14 @@ def _pick(item: Any, *keys: str, default: Any = None) -> Any:
         if hasattr(item, key):
             return getattr(item, key)
     return default
+
+
+def _gene_row(table: pd.DataFrame, gene: str) -> pd.Series:
+    row = table.loc[gene]
+    if isinstance(row, pd.DataFrame):
+        if row.empty:
+            return pd.Series(dtype=object)
+        row = row.iloc[0]
+    if not isinstance(row, pd.Series):
+        row = pd.Series(row)
+    return row
